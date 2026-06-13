@@ -1,51 +1,54 @@
 /**
- * n8n Code Node — Step 2: Build OpenAI API request payload
+ * n8n Code Node — Step 2: Build Gemini API request payload
+ *
+ * Uses Google Gemini 1.5 Flash (FREE — 1M tokens/day, no credit card)
+ * Get API key: https://aistudio.google.com/app/apikey
  *
  * Input:  Output from Step 1 (extracted PDF text)
- * Output: { body: object }  — ready to POST to OpenAI Chat Completions
+ * Output: { body: object, gemini_url: string, ... }
  *
- * Paste this entire file into the n8n Code node (JavaScript mode).
- * The output feeds directly into an HTTP Request node targeting:
- *   POST https://api.openai.com/v1/chat/completions
+ * The output feeds into an HTTP Request node:
+ *   POST {{ $json.gemini_url }}
+ *   Body: {{ JSON.stringify($json.body) }}
  */
 
 const { text, filename, email_subject, email_from, email_id } = $input.first().json;
 
-const systemPrompt = `You are an invoice data extraction specialist.
-Extract structured data from the invoice text provided and return ONLY valid JSON.
-No explanation, no markdown — pure JSON only.
+// Get API key from n8n environment variable
+const GEMINI_API_KEY = $env.GEMINI_API_KEY;
 
-Return this exact schema:
+const prompt = `Extract structured invoice data from the text below and return ONLY valid JSON — no markdown, no explanation.
+
+Required schema:
 {
   "vendor": "Company name that issued the invoice",
-  "invoice_number": "Invoice/receipt number or ID",
-  "date": "YYYY-MM-DD format",
+  "invoice_number": "Invoice or receipt number",
+  "date": "YYYY-MM-DD",
   "due_date": "YYYY-MM-DD or null",
-  "amount": numeric total (no currency symbol, just the number),
-  "currency": "3-letter ISO code e.g. USD, INR, EUR",
-  "tax": numeric tax amount or 0,
+  "amount": 0,
+  "currency": "3-letter ISO code e.g. USD INR EUR",
+  "tax": 0,
   "line_items": [
-    { "description": "item description", "quantity": 1, "unit_price": 0, "amount": 0 }
+    { "description": "item", "quantity": 1, "unit_price": 0, "amount": 0 }
   ],
-  "payment_method": "Credit Card / Bank Transfer / Unknown",
-  "notes": "any important notes or null"
+  "payment_method": "Credit Card or Bank Transfer or Unknown",
+  "notes": "any relevant notes or null"
 }
 
 Rules:
-- If a field cannot be found, use null for strings and 0 for numbers
-- For amount, use the final total (after tax)
-- Dates must be YYYY-MM-DD; if year is missing, assume current year
-- Line items: include up to 10 items maximum`;
+- Missing strings = null, missing numbers = 0
+- amount = final total AFTER tax
+- Dates must be YYYY-MM-DD
+- Max 10 line items
+- No currency symbols in numeric fields
 
-const userMessage = `Invoice filename: ${filename}
+Invoice filename: ${filename}
 Sender: ${email_from}
 Subject: ${email_subject}
 
---- EXTRACTED TEXT ---
+--- INVOICE TEXT ---
 ${text}
---- END ---
-
-Extract the invoice data and return JSON only.`;
+--- END ---`;
 
 return [{
   json: {
@@ -53,15 +56,19 @@ return [{
     filename,
     email_subject,
     email_from,
+    // Gemini endpoint — key goes in the URL (not Authorization header)
+    gemini_url: `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`,
     body: {
-      model: 'gpt-4o',
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user',   content: userMessage }
+      contents: [
+        {
+          parts: [{ text: prompt }]
+        }
       ],
-      temperature: 0.1,     // low temp = consistent, factual output
-      max_tokens: 800,
-      response_format: { type: 'json_object' }
+      generationConfig: {
+        temperature: 0.1,
+        maxOutputTokens: 1024,
+        responseMimeType: 'application/json'   // forces Gemini to return pure JSON
+      }
     }
   }
 }];

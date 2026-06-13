@@ -1,5 +1,5 @@
 {
-  "name": "Smart Invoice & Receipt Processor",
+  "name": "Smart Invoice & Receipt Processor — Gemini Free",
   "nodes": [
     {
       "parameters": {
@@ -62,7 +62,7 @@
         "jsCode": "// ── STEP 2: Build OpenAI API payload ──\n// Full code in: src/2_build_prompt.js\n\nconst { text, filename, email_subject, email_from, email_id } = $input.first().json;\n\nconst systemPrompt = `You are an invoice data extraction specialist. Extract structured data from the invoice text and return ONLY valid JSON. No explanation, no markdown.\\n\\nReturn this schema:\\n{\\n  \"vendor\": \"Company name\",\\n  \"invoice_number\": \"Invoice ID\",\\n  \"date\": \"YYYY-MM-DD\",\\n  \"due_date\": \"YYYY-MM-DD or null\",\\n  \"amount\": 0,\\n  \"currency\": \"USD\",\\n  \"tax\": 0,\\n  \"line_items\": [{\"description\": \"\", \"quantity\": 1, \"unit_price\": 0, \"amount\": 0}],\\n  \"payment_method\": \"Unknown\",\\n  \"notes\": null\\n}\\nRules: missing strings = null, missing numbers = 0, dates in YYYY-MM-DD.`;\n\nreturn [{ json: {\n  email_id, filename, email_subject, email_from,\n  body: {\n    model: 'gpt-4o',\n    messages: [\n      { role: 'system', content: systemPrompt },\n      { role: 'user', content: `Invoice: ${filename}\\nFrom: ${email_from}\\nSubject: ${email_subject}\\n\\n${text}\\n\\nReturn JSON only.` }\n    ],\n    temperature: 0.1,\n    max_tokens: 800,\n    response_format: { type: 'json_object' }\n  }\n}}];"
       },
       "id": "a1b2c3d4-0004-0004-0004-000000000004",
-      "name": "Build OpenAI Payload",
+      "name": "Build Gemini Payload",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [840, 220]
@@ -70,14 +70,11 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "https://api.openai.com/v1/chat/completions",
-        "authentication": "genericCredentialType",
-        "genericAuthType": "httpHeaderAuth",
+        "url": "={{ $json.gemini_url }}",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
-            { "name": "Authorization", "value": "=Bearer {{ $env.OPENAI_API_KEY }}" },
-            { "name": "Content-Type",  "value": "application/json" }
+            { "name": "Content-Type", "value": "application/json" }
           ]
         },
         "sendBody": true,
@@ -86,7 +83,7 @@
         "options": { "timeout": 30000 }
       },
       "id": "a1b2c3d4-0005-0005-0005-000000000005",
-      "name": "OpenAI — Extract Invoice Data",
+      "name": "Gemini — Extract Invoice Data",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4,
       "position": [1060, 220]
@@ -213,10 +210,10 @@
     "Extract PDF Text": {
       "main": [[{ "node": "Build OpenAI Payload", "type": "main", "index": 0 }]]
     },
-    "Build OpenAI Payload": {
-      "main": [[{ "node": "OpenAI — Extract Invoice Data", "type": "main", "index": 0 }]]
+    "Build Gemini Payload": {
+      "main": [[{ "node": "Gemini — Extract Invoice Data", "type": "main", "index": 0 }]]
     },
-    "OpenAI — Extract Invoice Data": {
+    "Gemini — Extract Invoice Data": {
       "main": [[{ "node": "Parse Invoice JSON", "type": "main", "index": 0 }]]
     },
     "Parse Invoice JSON": {
