@@ -1,0 +1,30 @@
+{
+  "_comment": "Sample output of the full pipeline after processing an AWS invoice PDF",
+
+  "vendor": "Amazon Web Services India Pvt Ltd",
+  "invoice_number": "IN-2025-00847",
+  "date": "2025-11-15",
+  "due_date": "2025-12-01",
+  "amount": 12450.00,
+  "currency": "INR",
+  "tax": 1890.68,
+  "line_items": [
+    { "description": "EC2 t3.medium — Mumbai (ap-south-1)", "quantity": 1, "unit_price": 8000.00,  "amount": 8000.00  },
+    { "description": "S3 Standard Storage 500GB",             "quantity": 1, "unit_price": 2559.32, "amount": 2559.32 }
+  ],
+  "payment_method": "Credit Card",
+  "notes": "GSTIN: 29AABCM4023F1ZI",
+
+  "email_id": "18f3a2b1c9d4e5f6",
+  "email_subject": "Your AWS Invoice for November 2025",
+  "email_from": "billing@amazon.com",
+  "filename": "AWS-Invoice-Nov-2025.pdf",
+  "processed_at": "2025-12-13T09:15:42.000Z",
+
+  "has_anomaly": true,
+  "anomaly_count": 1,
+  "anomalies": [
+    "High amount: INR 12450.00 (threshold: 10000)"
+  ],
+  "anomaly_summary": "High amount: INR 12450.00 (threshold: 10000)"
+}

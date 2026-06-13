@@ -1,0 +1,251 @@
+{
+  "name": "Smart Invoice & Receipt Processor",
+  "nodes": [
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [{ "mode": "everyMinute" }]
+        },
+        "filters": {
+          "readStatus": "unread"
+        },
+        "options": {
+          "downloadAttachments": true,
+          "attachmentsPrefix": "attachment"
+        }
+      },
+      "id": "a1b2c3d4-0001-0001-0001-000000000001",
+      "name": "Gmail Trigger",
+      "type": "n8n-nodes-base.gmailTrigger",
+      "typeVersion": 1,
+      "position": [180, 300],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "REPLACE_WITH_YOUR_GMAIL_CREDENTIAL_ID",
+          "name": "Gmail OAuth2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": false, "leftValue": "", "typeValidation": "loose" },
+          "conditions": [
+            {
+              "id": "check-has-attachment",
+              "leftValue": "={{ Object.keys($json.attachment || $json.binary || {}).length }}",
+              "rightValue": 0,
+              "operator": { "type": "number", "operation": "gt" }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "a1b2c3d4-0002-0002-0002-000000000002",
+      "name": "Has PDF Attachment?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [400, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ── STEP 1: Extract text from PDF attachment ──\n// Full code in: src/1_extract_pdf.js\n\nconst item = $input.first();\nconst binaryKeys = Object.keys(item.binary || {});\nconst pdfKey = binaryKeys.find(k =>\n  (item.binary[k].mimeType || '').includes('pdf') ||\n  (item.binary[k].fileName || '').toLowerCase().endsWith('.pdf')\n) || binaryKeys[0];\n\nif (!pdfKey) {\n  return [{ json: { error: 'No attachment found', skip: true } }];\n}\n\nconst attachment = item.binary[pdfKey];\nconst buffer = await this.helpers.getBinaryDataBuffer(item, pdfKey);\n\nlet extractedText = '';\ntry {\n  const raw = buffer.toString('latin1');\n  const textBlocks = raw.match(/BT[\\s\\S]*?ET/g) || [];\n  if (textBlocks.length > 0) {\n    extractedText = textBlocks.join(' ')\n      .replace(/\\b(Td|Tm|Tf|Tj|TJ|Tr|Ts|Tw|Tc|BT|ET|rg|RG|cm|Do|q|Q)\\b/g, ' ')\n      .replace(/\\[|\\]|\\(|\\)/g, ' ')\n      .replace(/\\\\\\d{3}/g, '')\n      .replace(/[^\\x20-\\x7E\\n]/g, ' ')\n      .replace(/\\s{2,}/g, ' ').trim();\n  }\n  if (extractedText.length < 80) {\n    extractedText = raw.replace(/[^\\x20-\\x7E\\n]/g, ' ').replace(/\\s{2,}/g, ' ').trim().substring(0, 4000);\n  }\n} catch (e) {\n  extractedText = `[PDF extraction error: ${e.message}]`;\n}\n\nreturn [{ json: {\n  text: extractedText.substring(0, 4000),\n  filename: attachment.fileName || 'invoice.pdf',\n  email_id: item.json.id || '',\n  email_subject: item.json.subject || '',\n  email_from: item.json.from || ''\n}}];"
+      },
+      "id": "a1b2c3d4-0003-0003-0003-000000000003",
+      "name": "Extract PDF Text",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [620, 220]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ── STEP 2: Build OpenAI API payload ──\n// Full code in: src/2_build_prompt.js\n\nconst { text, filename, email_subject, email_from, email_id } = $input.first().json;\n\nconst systemPrompt = `You are an invoice data extraction specialist. Extract structured data from the invoice text and return ONLY valid JSON. No explanation, no markdown.\\n\\nReturn this schema:\\n{\\n  \"vendor\": \"Company name\",\\n  \"invoice_number\": \"Invoice ID\",\\n  \"date\": \"YYYY-MM-DD\",\\n  \"due_date\": \"YYYY-MM-DD or null\",\\n  \"amount\": 0,\\n  \"currency\": \"USD\",\\n  \"tax\": 0,\\n  \"line_items\": [{\"description\": \"\", \"quantity\": 1, \"unit_price\": 0, \"amount\": 0}],\\n  \"payment_method\": \"Unknown\",\\n  \"notes\": null\\n}\\nRules: missing strings = null, missing numbers = 0, dates in YYYY-MM-DD.`;\n\nreturn [{ json: {\n  email_id, filename, email_subject, email_from,\n  body: {\n    model: 'gpt-4o',\n    messages: [\n      { role: 'system', content: systemPrompt },\n      { role: 'user', content: `Invoice: ${filename}\\nFrom: ${email_from}\\nSubject: ${email_subject}\\n\\n${text}\\n\\nReturn JSON only.` }\n    ],\n    temperature: 0.1,\n    max_tokens: 800,\n    response_format: { type: 'json_object' }\n  }\n}}];"
+      },
+      "id": "a1b2c3d4-0004-0004-0004-000000000004",
+      "name": "Build OpenAI Payload",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [840, 220]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/chat/completions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "=Bearer {{ $env.OPENAI_API_KEY }}" },
+            { "name": "Content-Type",  "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "bodyContentType": "json",
+        "jsonBody": "={{ JSON.stringify($json.body) }}",
+        "options": { "timeout": 30000 }
+      },
+      "id": "a1b2c3d4-0005-0005-0005-000000000005",
+      "name": "OpenAI — Extract Invoice Data",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1060, 220]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ── STEP 3: Parse OpenAI response ──\n// Full code in: src/3_parse_invoice.js\n\nconst response = $input.first().json;\nconst rawContent = response?.choices?.[0]?.message?.content || '';\n\nlet invoice = {};\ntry {\n  invoice = JSON.parse(rawContent);\n} catch (e) {\n  const match = rawContent.match(/\\{[\\s\\S]*\\}/);\n  try { invoice = match ? JSON.parse(match[0]) : {}; } catch { invoice = {}; }\n}\n\nconst prev = $('Build OpenAI Payload').first().json;\n\nconst clean = {\n  vendor:         String(invoice.vendor         || 'Unknown').trim(),\n  invoice_number: String(invoice.invoice_number || 'N/A').trim(),\n  date:           String(invoice.date           || new Date().toISOString().split('T')[0]).trim(),\n  due_date:       invoice.due_date ? String(invoice.due_date).trim() : null,\n  amount:         parseFloat(invoice.amount)  || 0,\n  currency:       String(invoice.currency     || 'USD').trim().toUpperCase(),\n  tax:            parseFloat(invoice.tax)     || 0,\n  line_items:     Array.isArray(invoice.line_items) ? invoice.line_items.slice(0, 10) : [],\n  payment_method: String(invoice.payment_method || 'Unknown').trim(),\n  notes:          invoice.notes ? String(invoice.notes).trim() : null,\n  email_id:       prev.email_id      || '',\n  email_subject:  prev.email_subject || '',\n  email_from:     prev.email_from    || '',\n  filename:       prev.filename      || '',\n  processed_at:   new Date().toISOString(),\n};\n\nreturn [{ json: clean }];"
+      },
+      "id": "a1b2c3d4-0006-0006-0006-000000000006",
+      "name": "Parse Invoice JSON",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1280, 220]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ── STEP 4: Anomaly detection ──\n// Full code in: src/4_anomaly_detector.js\n\nconst inv = $input.first().json;\nconst anomalies = [];\n\nif (inv.amount > 10000) anomalies.push(`High amount: ${inv.currency} ${inv.amount.toFixed(2)}`);\nif (inv.amount <= 0) anomalies.push(`Invalid amount: ${inv.amount}`);\nif (!inv.vendor || inv.vendor === 'Unknown') anomalies.push('Vendor name could not be extracted');\nif (!inv.invoice_number || inv.invoice_number === 'N/A') anomalies.push('Invoice number missing');\n\nif (inv.date) {\n  const d = new Date(inv.date), today = new Date();\n  today.setHours(0,0,0,0);\n  if (!isNaN(d) && d > today) anomalies.push(`Future date: ${inv.date}`);\n}\n\nif (inv.due_date) {\n  const due = new Date(inv.due_date), today = new Date();\n  if (!isNaN(due) && due < today) {\n    const days = Math.floor((today - due) / 86400000);\n    anomalies.push(`Overdue by ${days} day(s) — due: ${inv.due_date}`);\n  }\n}\n\nif (inv.tax > 0 && inv.amount > 0 && inv.tax / inv.amount > 0.5) {\n  anomalies.push(`Tax (${inv.tax}) is ${(inv.tax/inv.amount*100).toFixed(1)}% of total`);\n}\n\nif (inv.line_items?.length > 0) {\n  const lineTotal = inv.line_items.reduce((s, i) => s + (parseFloat(i.amount)||0), 0);\n  if (Math.abs(lineTotal - inv.amount) > 1 && lineTotal > 0) {\n    anomalies.push(`Line items total (${lineTotal.toFixed(2)}) ≠ invoice total (${inv.amount})`);\n  }\n}\n\nreturn [{ json: {\n  ...inv,\n  has_anomaly:     anomalies.length > 0,\n  anomaly_count:   anomalies.length,\n  anomalies,\n  anomaly_summary: anomalies.length > 0 ? anomalies.join(' | ') : 'Clean'\n}}];"
+      },
+      "id": "a1b2c3d4-0007-0007-0007-000000000007",
+      "name": "Detect Anomalies",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1500, 220]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "REPLACE_WITH_YOUR_GOOGLE_SHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Invoices",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Processed At":    "={{ $json.processed_at }}",
+            "Vendor":          "={{ $json.vendor }}",
+            "Invoice Number":  "={{ $json.invoice_number }}",
+            "Date":            "={{ $json.date }}",
+            "Due Date":        "={{ $json.due_date }}",
+            "Amount":          "={{ $json.amount }}",
+            "Currency":        "={{ $json.currency }}",
+            "Tax":             "={{ $json.tax }}",
+            "Payment Method":  "={{ $json.payment_method }}",
+            "Line Items":      "={{ JSON.stringify($json.line_items) }}",
+            "Has Anomaly":     "={{ $json.has_anomaly }}",
+            "Anomaly Details": "={{ $json.anomaly_summary }}",
+            "Email Subject":   "={{ $json.email_subject }}",
+            "Email From":      "={{ $json.email_from }}",
+            "Filename":        "={{ $json.filename }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "a1b2c3d4-0008-0008-0008-000000000008",
+      "name": "Log to Google Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [1720, 120],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "REPLACE_WITH_YOUR_SHEETS_CREDENTIAL_ID",
+          "name": "Google Sheets OAuth2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": false, "leftValue": "", "typeValidation": "loose" },
+          "conditions": [
+            {
+              "id": "check-anomaly",
+              "leftValue": "={{ $json.has_anomaly }}",
+              "rightValue": true,
+              "operator": { "type": "boolean", "operation": "true" }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "a1b2c3d4-0009-0009-0009-000000000009",
+      "name": "Has Anomaly?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1720, 340]
+    },
+    {
+      "parameters": {
+        "sendTo":   "REPLACE_WITH_YOUR_ALERT_EMAIL",
+        "subject":  "=⚠️ Invoice Anomaly Detected — {{ $json.vendor }} ({{ $json.currency }} {{ $json.amount }})",
+        "emailType": "html",
+        "message":  "=<h2>Invoice Anomaly Alert</h2>\n<p><strong>Vendor:</strong> {{ $json.vendor }}<br>\n<strong>Invoice #:</strong> {{ $json.invoice_number }}<br>\n<strong>Date:</strong> {{ $json.date }}<br>\n<strong>Amount:</strong> {{ $json.currency }} {{ $json.amount }}<br>\n<strong>From Email:</strong> {{ $json.email_from }}<br>\n<strong>Subject:</strong> {{ $json.email_subject }}</p>\n<h3>Anomalies Found ({{ $json.anomaly_count }})</h3>\n<ul>{{ $json.anomalies.map(a => '<li>' + a + '</li>').join('') }}</ul>\n<p><em>Processed at: {{ $json.processed_at }}</em></p>",
+        "options": {}
+      },
+      "id": "a1b2c3d4-0010-0010-0010-000000000010",
+      "name": "Send Alert Email",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2,
+      "position": [1940, 260],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "REPLACE_WITH_YOUR_GMAIL_CREDENTIAL_ID",
+          "name": "Gmail OAuth2"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Gmail Trigger": {
+      "main": [[{ "node": "Has PDF Attachment?", "type": "main", "index": 0 }]]
+    },
+    "Has PDF Attachment?": {
+      "main": [
+        [{ "node": "Extract PDF Text", "type": "main", "index": 0 }],
+        []
+      ]
+    },
+    "Extract PDF Text": {
+      "main": [[{ "node": "Build OpenAI Payload", "type": "main", "index": 0 }]]
+    },
+    "Build OpenAI Payload": {
+      "main": [[{ "node": "OpenAI — Extract Invoice Data", "type": "main", "index": 0 }]]
+    },
+    "OpenAI — Extract Invoice Data": {
+      "main": [[{ "node": "Parse Invoice JSON", "type": "main", "index": 0 }]]
+    },
+    "Parse Invoice JSON": {
+      "main": [[{ "node": "Detect Anomalies", "type": "main", "index": 0 }]]
+    },
+    "Detect Anomalies": {
+      "main": [[
+        { "node": "Log to Google Sheets", "type": "main", "index": 0 },
+        { "node": "Has Anomaly?",         "type": "main", "index": 0 }
+      ]]
+    },
+    "Has Anomaly?": {
+      "main": [
+        [{ "node": "Send Alert Email", "type": "main", "index": 0 }],
+        []
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner",
+    "errorWorkflow": ""
+  },
+  "versionId": "1",
+  "id": "smart-invoice-processor-v1",
+  "meta": {
+    "templateCredsSetupCompleted": false,
+    "instanceId": ""
+  }
+}
