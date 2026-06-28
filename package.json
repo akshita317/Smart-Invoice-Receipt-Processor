@@ -1,0 +1,25 @@
+{
+  "name": "smart-invoice-receipt-processor",
+  "version": "1.0.0",
+  "description": "AI-powered invoice & receipt processor using n8n + Gemini + Google Sheets",
+  "author": "Akshita Kumari",
+  "license": "MIT",
+  "scripts": {
+    "start": "npx n8n",
+    "start:bg": "npm install -g pm2 && pm2 start \"npx n8n\" --name n8n",
+    "stop": "pm2 stop n8n",
+    "logs": "pm2 logs n8n"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "keywords": [
+    "n8n",
+    "invoice",
+    "receipt",
+    "automation",
+    "gemini",
+    "google-sheets",
+    "ai"
+  ]
+}

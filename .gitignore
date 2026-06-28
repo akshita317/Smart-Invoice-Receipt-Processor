@@ -1,0 +1,13 @@
+# Environment — never commit real credentials
+.env
+
+# n8n local data (database, encryption key, logs)
+.n8n/
+
+# Node
+node_modules/
+npm-debug.log*
+
+# OS
+.DS_Store
+Thumbs.db
