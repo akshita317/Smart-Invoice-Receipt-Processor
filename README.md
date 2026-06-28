@@ -1,6 +1,6 @@
 # Smart Invoice & Receipt Processor
 
-An AI-powered automation that watches your inbox, extracts structured data from invoice PDFs using GPT-4o, logs everything to Google Sheets, and fires alerts when anomalies are detected — fully orchestrated with n8n.
+An AI-powered automation that watches your inbox, extracts structured data from invoice PDFs using GPT-4o, logs everything to Google Sheets and fires alerts when anomalies are detected fully orchestrated with n8n.
 
 Built by **Akshita Kumari** · [LinkedIn](https://www.linkedin.com/in/akshitakumari317/) · [GitHub](https://github.com/akshita317)
 
